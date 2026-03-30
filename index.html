@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PartsTown: Between the Calls</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { 
+            background: #111; color: #fff; font-family: 'Courier New', monospace; 
+            text-align: center; margin: 0; padding: 10px; 
+            overflow-x: hidden;
+            touch-action: manipulation;
+        }
+        
+        #container { 
+            position: relative; 
+            width: 95vw; 
+            max-width: 800px; 
+            height: 300px; 
+            margin: 0 auto; 
+            border: 4px solid #fff; 
+            overflow: hidden; 
+            background-color: #70c5ce; 
+            cursor: pointer; user-select: none;
+        }
+        
+        canvas { display: block; image-rendering: pixelated; width: 100%; height: 100%; }
+        
+        #modalOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center;
+            z-index: 2000;
+        }
+        #howToModal {
+            background: #222; border: 4px solid #f1c40f; padding: 20px; width: 85%; max-width: 400px;
+            box-shadow: 0 0 20px #f1c40f; text-align: left; font-size: 14px;
+        }
+        #howToModal h2 { color: #f1c40f; text-align: center; margin-top: 0; font-size: 20px; }
+        .key { background: #444; padding: 2px 6px; border-radius: 3px; color: #f1c40f; }
+        #closeModal { 
+            display: block; width: 100%; padding: 12px; margin-top: 20px;
+            background: #f1c40f; color: #000; border: none; font-weight: bold;
+            cursor: pointer; font-family: 'Courier New', monospace; font-size: 18px;
+        }
+
+        #nameInput { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            width: 80%; padding: 15px; display: none; z-index: 1000; 
+            background: #000; color: #f1c40f; border: 3px solid #f1c40f; 
+            font-size: 18px; text-align: center; outline: none;
+        }
+
+        #powerDisp { position: absolute; top: 5px; left: 5px; text-align: left; font-size: 12px; font-weight: bold; pointer-events: none; z-index: 10; text-shadow: 2px 2px #000; }
+        
+        .bottom-ui { 
+            width: 95vw; max-width: 800px; margin: 10px auto; 
+            display: flex; flex-direction: row; justify-content: space-between; 
+            flex-wrap: wrap; gap: 10px;
+        }
+        
+        .stats-left { font-size: 18px; text-align: left; flex: 1; }
+        .leaderboard-container { width: 100%; max-width: 250px; background: #222; border: 2px solid #f1c40f; padding: 8px; text-align: left; }
+        #list { font-size: 12px; margin-top: 5px; color: #ddd; line-height: 1.4; }
+        .global-section { width: 95vw; max-width: 800px; margin: 20px auto; }
+    </style>
+</head>
+<body>
+
+    <div id="modalOverlay">
+        <div id="howToModal">
+            <h2>HOW TO PLAY</h2>
+            <p>🏃 <strong>JUMP:</strong> <strong>TAP SCREEN</strong> or <span class="key">SPACE</span>.</p>
+            <p>🚀 <strong>DOUBLE JUMP:</strong> Tap again mid-air.</p>
+            <p>⏸️ <strong>PAUSE:</strong> Press <span class="key">P</span>.</p>
+            <p>🌸 <strong>AVOID:</strong> Don't hit the flowers!</p>
+            <p>🔋 <strong>POWER-UPS:</strong> 
+                <br>• <span style="color:#00d2d3">Blue:</span> God Mode
+                <br>• <span style="color:#ff4d4d">Red:</span> Life
+                <br>• <span style="color:#fff">White:</span> 3x Jump
+            </p>
+            <button id="closeModal">LET'S GO!</button>
+        </div>
+    </div>
+
+    <h2 style="color: #f1c40f; font-size: 18px; letter-spacing: 1px;">PARTSTOWN: BETWEEN THE CALLS</h2>
+    
+    <div id="container">
+        <div id="powerDisp"></div>
+        <canvas id="g" width="800" height="300"></canvas>
+        <input type="text" id="nameInput" maxlength="12" placeholder="NAME + ENTER">
+    </div>
+
+    <div class="bottom-ui">
+        <div class="stats-left">
+            Lvl: <span id="lvlText">1</span> | Score: <span id="scoreText">0</span>
+        </div>
+        <div class="leaderboard-container">
+            <span style="color:#f1c40f; font-weight:bold; font-size:12px;">🏆 LOCAL TOP 10</span>
+            <div id="list"></div>
+        </div>
+    </div>
+
+    <div class="global-section">
+        <h3 style="color:#f1c40f; font-size: 16px;">🌍 GLOBAL LEADERBOARD</h3>
+        <iframe id="iframe-jpwnykdcndwvr" src="https://leaderboarded.com/embed/jpwnykdcndwvr/" style="width:100%;border:none;" scrolling="no"></iframe>
+    </div>
+
+<script>
+    const canvas = document.getElementById("g");
+    const ctx = canvas.getContext("2d");
+    const nameInput = document.getElementById("nameInput");
+    const powerDisp = document.getElementById("powerDisp");
+    const container = document.getElementById("container");
+    const listDiv = document.getElementById("list");
+    const globalIframe = document.getElementById("iframe-jpwnykdcndwvr");
+    const modal = document.getElementById("modalOverlay");
+
+    const BOARD_TOKEN = "jpwnykdcndwvr";
+    const API_KEY = "zwpbprhszbbne";
+
+    let score = 0, state = "START", frame = 0, leaderboard = [];
+    let birdY = 200, birdDy = 0, jumpsUsed = 0; 
+    let flowers = [], ledges = [], clouds = [], powerups = [], trail = [];
+    let lives = 2, invinceTimer = 0, godModeTimer = 0, tripleJumpsLeft = 0, nextPowerFrame = 800; 
+    let paused = false, lvlUpTimer = 0, currentLvl = 1;
+
+    const W = 800;
+    const H = 300;
+    const BIRD_W = 28; // Smaller player width
+    const BIRD_H = 22; // Smaller player height base
+
+    for(let i=0; i<5; i++) clouds.push({ x: Math.random()*W, y: 20 + Math.random()*80, w: 60 + Math.random()*40 });
+
+    document.getElementById("closeModal").onclick = (e) => {
+        e.stopPropagation();
+        modal.style.display = "none";
+    };
+
+    window.onmessage = (e) => {
+        if (e.data.hasOwnProperty("frameHeight")) {
+            const frameEl = document.getElementById("iframe-" + e.data.board_token);
+            if(frameEl) frameEl.style.height = `${e.data.frameHeight + 20}px`;
+        }
+    };
+
+    async function saveScore(name, finalScore) {
+        const cleanName = name.toUpperCase() || "ANON";
+        leaderboard.push({n: cleanName, s: finalScore});
+        leaderboard.sort((a, b) => b.s - a.s);
+        leaderboard = leaderboard.slice(0, 10);
+        localStorage.setItem("PARTTOWN_LEADERBOARD_V1", JSON.stringify(leaderboard));
+        updateBoardUI();
+
+        try {
+            await fetch(`https://leaderboarded.com/api/v1/boards/${BOARD_TOKEN}/scores`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+                body: JSON.stringify({ nickname: cleanName, score: finalScore })
+            });
+            globalIframe.src = globalIframe.src;
+        } catch (err) { console.warn("Global save failed."); }
+    }
+
+    function updateBoardUI() {
+        const data = localStorage.getItem("PARTTOWN_LEADERBOARD_V1");
+        leaderboard = data ? JSON.parse(data) : [];
+        listDiv.innerHTML = leaderboard.slice(0, 5).map((entry, i) => 
+            `<div>${i+1}. ${entry.n.padEnd(8, '.')} ${entry.s}</div>`
+        ).join('');
+    }
+
+    function reset() {
+        state = "PLAY"; score = 0; birdY = 150; birdDy = 0; jumpsUsed = 0; paused = false;
+        lives = 2; invinceTimer = 0; godModeTimer = 0; tripleJumpsLeft = 0; nextPowerFrame = 600;
+        currentLvl = 1; lvlUpTimer = 0; flowers = []; ledges = []; frame = 0; powerups = []; trail = [];
+        nameInput.style.display = "none";
+        document.getElementById("scoreText").innerText = "0";
+        document.getElementById("lvlText").innerText = "1";
+    }
+
+    function drawPowerup(p) {
+        let pulse = Math.sin(frame * 0.1) * 4;
+        let color = p.type === 'GOD' ? "#00d2d3" : (p.type === 'LIFE' ? "#ff4d4d" : "#ffffff");
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = color; ctx.fillStyle = color; ctx.globalAlpha = 0.4;
+        ctx.beginPath(); ctx.arc(p.x + 12, p.y + 12, 18 + pulse, 0, Math.PI*2); ctx.fill();
+        ctx.globalAlpha = 1.0; ctx.beginPath(); ctx.arc(p.x + 12, p.y + 12, 10 + (pulse/2), 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+    }
+
+    function loop() {
+        ctx.clearRect(0, 0, W, H);
+        if (state === "PLAY" && !paused) frame++;
+
+        let lvl = Math.floor(score / 20) + 1;
+        if (lvl > currentLvl) { currentLvl = lvl; lvlUpTimer = 100; }
+        let colors = ["#70c5ce", "#5f27cd", "#222f3e", "#0c0d21"];
+        canvas.style.backgroundColor = colors[Math.min(lvl-1, 3)];
+
+        clouds.forEach(c => { 
+            if (state === "PLAY" && !paused) c.x -= 1.5; 
+            if (c.x + c.w < 0) c.x = W; 
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)"; ctx.fillRect(c.x, c.y, c.w, 20);
+        });
+
+        if (state === "PLAY") {
+            let speed = Math.min(7 + (score * 0.15), 18);
+            if (!paused) {
+                birdDy += 0.6; birdY += birdDy;
+                if (birdY > 278 - BIRD_H) { birdY = 278 - BIRD_H; birdDy = 0; jumpsUsed = 0; }
+                trail.push({y: birdY, x: 80, a: 0.6});
+                if (trail.length > 8) trail.shift();
+                if (frame >= nextPowerFrame) {
+                    let types = ['GOD', 'LIFE', 'JUMP'];
+                    powerups.push({ x: W, y: [240, 140, 40][Math.floor(Math.random()*3)], type: types[Math.floor(Math.random()*3)] });
+                    nextPowerFrame = frame + 1000 + Math.random() * 1000;
+                }
+            }
+
+            powerDisp.innerHTML = (godModeTimer > 0 ? `GOD:${(godModeTimer/60).toFixed(1)}s ` : "") + (tripleJumpsLeft > 0 ? `JUMPS:${tripleJumpsLeft}` : "");
+
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                let p = powerups[i];
+                if (!paused) p.x -= speed;
+                drawPowerup(p);
+                // Hitbox for powerups
+                if (p.x < 110 && p.x > 50 && birdY + BIRD_H > p.y && birdY < p.y+25) {
+                    if (p.type === 'GOD') godModeTimer = 600; else if (p.type === 'LIFE') lives++; else tripleJumpsLeft = 5;
+                    powerups.splice(i, 1);
+                } else if (p.x < -50) powerups.splice(i, 1);
+            }
+
+            for (let i = ledges.length - 1; i >= 0; i--) {
+                let l = ledges[i];
+                if (!paused) l.x -= speed; 
+                ctx.fillStyle = "#5d4037"; ctx.fillRect(l.x, l.y, l.w, 15);
+                // Collision for ledge top
+                if (birdDy > 0 && birdY+BIRD_H > l.y && birdY+BIRD_H < l.y+15 && 80+BIRD_W > l.x && 80 < l.x+l.w) { 
+                    birdY = l.y-BIRD_H; birdDy = 0; jumpsUsed = 0; 
+                }
+                if (l.x < -l.w) ledges.splice(i, 1);
+            }
+            if (!paused && frame % 400 === 0) ledges.push({x: W, y: 150 + Math.random()*40, w: 250});
+
+            if (!paused && frame % Math.floor(100/(speed/7)) === 0) {
+                flowers.push({x: W, color: ["#ff7979", "#f9ca24", "#be2edd", "#1dd1a1"][Math.floor(Math.random()*4)], h: 25 + Math.random() * 50});
+            }
+
+            for (let i = flowers.length - 1; i >= 0; i--) {
+                let f = flowers[i];
+                if (!paused) f.x -= speed;
+                ctx.fillStyle = "#2ecc71"; ctx.fillRect(f.x+13, H-f.h, 4, f.h);
+                ctx.fillStyle = f.color; ctx.fillRect(f.x+5, (H-5)-f.h, 20, 10);
+                // Hitbox for flowers
+                if (f.x < 105 && f.x > 55 && (birdY+BIRD_H) > (H-f.h-10) && invinceTimer <= 0 && godModeTimer <= 0) {
+                    if (lives > 1) { lives--; invinceTimer = 100; } 
+                    else { state = "NAME"; nameInput.style.display = "block"; nameInput.value = ""; setTimeout(() => nameInput.focus(), 100); }
+                }
+                if (f.x < -30) { flowers.splice(i, 1); score++; document.getElementById("scoreText").innerText = score; document.getElementById("lvlText").innerText = lvl; }
+            }
+
+            if (!paused && godModeTimer > 0) godModeTimer--;
+            ctx.save();
+            if (invinceTimer > 0) { if (!paused) invinceTimer--; if (frame % 10 < 5) ctx.globalAlpha = 0.3; }
+            trail.forEach(t => { 
+                ctx.globalAlpha *= 0.9; 
+                ctx.fillStyle = godModeTimer > 0 ? "#00d2d3" : "#f1c40f"; 
+                ctx.fillRect(t.x, t.y + 4, BIRD_W, BIRD_H); 
+            });
+            ctx.restore();
+            
+            ctx.save();
+            if (invinceTimer > 0 && frame % 10 < 5) ctx.globalAlpha = 0.3;
+            ctx.fillStyle = godModeTimer > 0 ? "#00d2d3" : (jumpsUsed === 0 ? "#f1c40f" : "#e67e22");
+            let fH = (birdDy < 0) ? BIRD_H + 10 : BIRD_H; 
+            ctx.fillRect(80, birdY + (BIRD_H - fH), BIRD_W, fH);
+            ctx.fillStyle = "#000"; ctx.fillRect(80 + (BIRD_W - 8), birdY + (BIRD_H - fH) + 6, 4, 4);
+            ctx.restore();
+
+            for (let i = 0; i < lives; i++) { ctx.fillStyle = "#ff4d4d"; ctx.fillRect((W-30) - (i * 25), 15, 15, 15); }
+
+            if (lvlUpTimer > 0) {
+                ctx.fillStyle = "white"; ctx.font = "bold 40px Courier"; ctx.textAlign = "center";
+                ctx.fillText("LEVEL UP!", W/2, 100);
+                if (!paused) lvlUpTimer--;
+            }
+            if (paused) {
+                ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0,0,W,H);
+                ctx.fillStyle = "white"; ctx.font = "30px Courier"; ctx.textAlign = "center";
+                ctx.fillText("PAUSED", W/2, H/2);
+            }
+        } else {
+            ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0,0,W,H);
+            ctx.fillStyle = "white"; ctx.font = "20px Courier"; ctx.textAlign = "center";
+            let msg = state === "START" ? "TAP TO START" : (state === "NAME" ? "NAME + ENTER:" : "GAME OVER: TAP TO RESTART");
+            ctx.fillText(msg, W/2, H/2 - 10);
+        }
+        requestAnimationFrame(loop);
+    }
+
+    function handleInput() {
+        if (state === "NAME" || modal.style.display !== "none" || paused) return;
+        if (state === "START" || state === "OVER") reset();
+        else if (state === "PLAY") {
+            let maxJumps = (tripleJumpsLeft > 0) ? 3 : 2;
+            if (jumpsUsed < maxJumps) { birdDy = -11; jumpsUsed++; if (jumpsUsed === 3 && tripleJumpsLeft > 0) tripleJumpsLeft--; }
+        }
+    }
+
+    container.addEventListener("touchstart", (e) => { e.preventDefault(); handleInput(); }, {passive: false});
+    container.addEventListener("mousedown", (e) => { e.preventDefault(); handleInput(); });
+    window.addEventListener("keydown", (e) => {
+        if (e.code === "Space") { e.preventDefault(); handleInput(); }
+        if (e.key.toLowerCase() === "p" && state === "PLAY") { paused = !paused; }
+        if (e.key === "Enter" && state === "NAME") {
+            saveScore(nameInput.value, score);
+            state = "OVER"; nameInput.style.display = "none";
+        }
+    });
+
+    updateBoardUI(); loop();
+</script>
+</body>
+</html>
